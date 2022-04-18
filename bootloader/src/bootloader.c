@@ -144,7 +144,7 @@ void handle_boot(void)
     // Print the release message
     rel_msg = (uint8_t *)FIRMWARE_RELEASE_MSG_PTR;
 
-    // Debug instead (TODO remove)
+    /*// Debug instead (TODO remove)
     #ifdef EXAMPLE_AES
     rel_msg = (uint8_t *)glob_pt;
     #endif
@@ -161,6 +161,7 @@ void handle_boot(void)
     memcpy(msgbuf2, msgbuf, 16);
     rel_msg = msgbuf2;
     #endif
+    */
 
     for(i = 1024; i && *rel_msg; i--) {
         uart_writeb(HOST_UART, *rel_msg);
