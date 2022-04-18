@@ -1,0 +1,118 @@
+#!/usr/bin/python3 -u
+
+# 2022 eCTF
+# Spartans
+# Memory Readback Tool
+
+import argparse
+from cmath import atan
+import logging
+import socket
+from pathlib import Path
+
+from util import print_banner, LOG_FORMAT
+
+logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
+log = logging.getLogger(Path(__file__).name)
+
+
+def readback(socket_number, region, num_bytes):
+    # Print Banner
+    print_banner("SAFFIRe Memory Readback Tool")
+
+    # Read in secrets
+    log.info("Reading secrets...")
+    auth_key_file = Path("/secrets/auth.bin")
+    auth_key = auth_key_file.read_bytes()
+
+    # Connect to the bootoader
+    log.info("Connecting socket...")
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.connect(("saffire-net", socket_number))
+
+        # Send readback command
+        log.info("Sending readback command...")
+        sock.send(b"R")
+
+        # Receive bootloader acknowledgement
+        log.info("Waiting for bootloader to enter readback mode...")
+        while sock.recv(1) != b"R":
+            pass
+
+        # Send the region identifier
+        log.info("Sending the region identifier to read back...")
+        if region == "firmware":
+            # send firmware identifier
+            sock.send(b"F")
+            # get acknowledgement
+            log.info("Waiting for bootloader to confirm the region...")
+            while sock.recv(1) != b"F":
+                pass
+        elif region == "configuration":
+            # send configuration identifier
+            sock.send(b"C")
+            # get acknowledgement
+            log.info("Waiting for bootloader to confirm the region...")
+            while sock.recv(1) != b"C":
+                pass
+        else:
+            # send character other than an identifier to exit readback
+            sock.send(b"Q")
+            return
+
+        # Send the number of bytes to read
+        size = int.to_bytes(num_bytes, 4, "big")
+        sock.send(size)
+
+        # Send the readback authorization key
+        sock.send(auth_key)
+        while (rsp:=sock.recv(1)) != b"1" and rsp != b"0":
+            pass
+        if rsp == b"0":
+            log.info("Authentication failure.")
+            return
+        
+        # Receive firmware data
+        log.info(f"Got {rsp}, Receiving firmware...")
+        bytes_remaining = num_bytes
+        fw = b""
+        while bytes_remaining > 0:
+            num_bytes = 4096 if bytes_remaining > 4096 else bytes_remaining
+            data = sock.recv(num_bytes)
+            num_received = len(data)
+            fw += data
+            bytes_remaining -= num_received
+
+        log.info(f"Memory Readback Data: {fw.hex()}\n")
+        print(f"{fw.hex()}\n")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--socket",
+        help="Port number of the socket to connect the host to the bootloader.",
+        type=int,
+        required=True,
+    )
+    parser.add_argument(
+        "--region",
+        help="The region to read.",
+        choices=["firmware", "configuration"],
+        required=True,
+    )
+    parser.add_argument(
+        "--num-bytes",
+        help="The number of bytes to read from the region.",
+        type=int,
+        required=True,
+    )
+
+    args = parser.parse_args()
+
+    readback(args.socket, args.region, args.num_bytes)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# 2022 eCTF
+# Spartans
+# EEPROM builder for SAFFIRe bootloader
+
+cat /secrets/fw_key.bin >> /bootloader/eeprom.bin
+cat /secrets/cfg_key.bin >> /bootloader/eeprom.bin
+cat /secrets/auth.bin >> /bootloader/eeprom.bin
+echo "Bootloader Data" >> /bootloader/eeprom.bin

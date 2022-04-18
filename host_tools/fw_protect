@@ -1,0 +1,90 @@
+#!/usr/bin/python3 -u
+
+# 2022 eCTF
+# Spartans
+# Firmware Protection Tool
+
+import argparse
+import json
+import logging
+from pathlib import Path
+
+from Crypto.Cipher import AES
+from Crypto.Random import get_random_bytes
+
+from util import print_banner, FIRMWARE_ROOT, LOG_FORMAT
+
+logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
+log = logging.getLogger(Path(__file__).name)
+
+
+def protect_firmware(
+    firmware_file: Path, version: int, release_message: str, protected_firmware: Path
+):
+    print_banner("SAFFIRe Firmware Protect Tool")
+
+    # Read in secrets
+    log.info("Reading secrets...")
+    fw_key_file = Path("/secrets/fw_key.bin")
+    fw_key = fw_key_file.read_bytes()
+
+    # Read in the raw firmware binary
+    log.info("Reading the firmware...")
+    firmware_data = firmware_file.read_bytes()
+
+    log.info("Packaging the firmware...")
+
+    # Construct the metadata
+    firmware_size = len(firmware_data)
+
+    # Encrypt firmware
+    nonce = get_random_bytes(12)
+    cipher = AES.new(fw_key, AES.MODE_GCM, nonce=nonce)
+    cipher.update(firmware_size.to_bytes(4, 'big'))
+    ct, tag = cipher.encrypt_and_digest(firmware_data)
+
+    # Create firmware storage structure
+    data = {
+        "firmware_size": firmware_size,
+        "version_num": version,
+        "release_msg": release_message,
+        "iv": nonce.hex(),
+        "ct": firmware_data.hex(),
+    }
+
+    # Write to the output file
+    with protected_firmware.open("w", encoding="utf8") as fd:
+        json.dump(data, fd)
+
+    log.info("Firmware protected\n")
+
+
+def main():
+    # get arguments
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--firmware", help="The name of the firmware image to protect.", required=True
+    )
+    parser.add_argument(
+        "--version", help="The version of this firmware.", type=int, required=True
+    )
+    parser.add_argument(
+        "--release-message", help="The release message of this firmware.", required=True
+    )
+    parser.add_argument(
+        "--output-file", help="The name of the protected firmware image.", required=True
+    )
+
+    args = parser.parse_args()
+
+    # process command
+    firmware_file = FIRMWARE_ROOT / args.firmware
+    protected_firmware = FIRMWARE_ROOT / args.output_file
+    protect_firmware(
+        firmware_file, args.version, args.release_message, protected_firmware
+    )
+
+
+if __name__ == "__main__":
+    main()

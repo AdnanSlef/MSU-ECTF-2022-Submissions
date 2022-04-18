@@ -1,0 +1,4 @@
+Public Domain by Markus Kosmal
+Modified by Spartans
+
+https://github.com/mko-x/SharedAES-GCM.git
