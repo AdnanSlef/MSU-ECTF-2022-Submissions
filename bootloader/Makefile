@@ -62,7 +62,7 @@ endif
 
 
 ################  start  digital signature ################
-DO_MAKE_SWEET_B=yes
+#DO_MAKE_SWEET_B=yes
 ifdef DO_MAKE_SWEET_B
 
 # add compiler flag to enable test SB code 

@@ -4,7 +4,7 @@ echo '
 --sysname=crypto-test-1
 --oldest-allowed-version=1
 --sock-root=socks
---uart-sock=1558
+--uart-sock=1758
 --fw-root=firmware
 --raw-fw-file=example_fw.bin
 --protected-fw-file=test_crypto_1_fw.prot

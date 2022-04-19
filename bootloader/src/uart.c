@@ -113,7 +113,7 @@ uint32_t uart_read(uint32_t uart, uint8_t *buf, uint32_t n)
  * @param buf is a pointer to the destination for the received data.
  * @return the number of bytes read from the UART interface.
  */
-uint32_t uart_readline(uint32_t uart, uint8_t *buf)
+uint32_t uart_readline(uint32_t uart, uint8_t *buf, uint32_t size)
 {
     uint32_t read = 0;
     uint8_t c;
@@ -125,7 +125,7 @@ uint32_t uart_readline(uint32_t uart, uint8_t *buf)
             buf[read] = c;
             read++;
         }
-    } while ((c != '\n') && (c != '\0'));
+    } while ((c != '\n') && (c != '\0') && (read < size-1));
 
     buf[read] = '\0';
 

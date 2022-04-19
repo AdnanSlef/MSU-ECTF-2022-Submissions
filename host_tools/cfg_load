@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 import socket
 import struct
+import json
 
 from util import print_banner, send_packets, RESP_OK, CONFIGURATION_ROOT, LOG_FORMAT
 
@@ -20,8 +21,12 @@ def load_configuration(socket_number: int, config_file: Path):
     print_banner("SAFFIRe Configuration Tool")
 
     log.info("Reading configuration file...")
-    configuration = config_file.read_bytes()
-    size = len(configuration)
+    with config_file.open("rb") as fw:
+        data = json.load(fw)
+        iv = bytes.fromhex(data["iv"])
+        ct = bytes.fromhex(data["ct"])
+        tag = bytes.fromhex(data["tag"])
+        size = len(ct)
 
     # Connect to the bootloader
     log.info("Connecting socket...")
@@ -36,16 +41,19 @@ def load_configuration(socket_number: int, config_file: Path):
         while sock.recv(1) != b"C":
             pass
 
-        # Send the size
-        log.info("Sending the size...")
-        payload = struct.pack(">I", size)
+        # Send the metadata
+        log.info("Sending the metadata...")
+        payload = ( struct.pack(">I", size)
+                  + iv
+                  + tag
+        )
         sock.send(payload)
         response = sock.recv(1)
         if response != RESP_OK:
             exit(f"ERROR: Bootloader responded with {repr(response)}")
 
         # Send packets
-        send_packets(sock, configuration)
+        send_packets(sock, ct)
 
         log.info("Firmware configured\n")
 

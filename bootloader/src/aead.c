@@ -10,9 +10,7 @@
 #include "aead.h"
 #include "gcm.h"
 
-#define KEY_LEN 16
-#define IV_LEN 12
-#define TAG_LEN 16
+#include "uart.h" //TODO rmv
 
 /**
  * @brief Verifies that two uint8_t[] arrays are equal to the first `len` bytes.
@@ -34,9 +32,16 @@ int is_equal(const uint8_t *a, const uint8_t *b, const size_t len) {
 /**
  * @brief Decapsulates an AEAD package, verifying authorization.
  * 
- * @param pt Buffer 
- * @return TODO 0 on success, or -1 if an invalid block address was specified or the 
- * block is write-protected.
+ * @param pt       Output buffer
+ * @param ct       Input buffer
+ * @param ct_len   Length of data
+ * @param aad      Additional authenticated data buffer
+ * @param aad_len  Length of additional authenticated data
+ * @param key      Decryption key buffer
+ * @param iv       Nonce buffer
+ * @param tag      Authentication tag buffer
+ * 
+ * @return 0 on success, GCM_AUTH_FAILURE otherwise
  */
 int aead_dec(   uint8_t *pt,
                 const uint8_t *ct,
@@ -48,20 +53,20 @@ int aead_dec(   uint8_t *pt,
                 const uint8_t *tag
             )
 {
-    
-    int err = 0;
+    uint32_t err = 0;
     gcm_context ctx;
     
     uint8_t tag_buf[16];
     
+    // Set Symmetric Key
     gcm_setkey( &ctx, key, KEY_LEN );
+
+    // Perform Decryption    
+    gcm_start  ( &ctx, DECRYPT, iv, IV_LEN, aad, aad_len );
+    gcm_update ( &ctx, ct_len, ct, pt );
+    gcm_finish ( &ctx, tag_buf, TAG_LEN );
     
-    err = gcm_crypt_and_tag(&ctx, DECRYPT,
-                            iv, IV_LEN,
-                            aad, aad_len,
-                            ct, pt, ct_len,
-                            tag_buf, TAG_LEN);
-    
+    // Clear GCM Context
     gcm_zero_ctx( &ctx );
 
     if (!is_equal(tag_buf, tag, 16)) {
@@ -69,35 +74,77 @@ int aead_dec(   uint8_t *pt,
     }
 
     if(err) {
-        memset(pt, 0, ct_len);
+        memset(pt, 0, ct_len); //TODO erase flash instead if appropriate
     }
 
     return err;
 
 }
 
-
-/***************** Test Functions *****************/
-
-/*
-int test_aead_enc()
+/**
+ * @brief Verifies message authorization and integrity.
+ * 
+ * @param ct       Input buffer
+ * @param ct_len   Length of data
+ * @param aad      Additional authenticated data buffer
+ * @param aad_len  Length of additional authenticated data
+ * @param key      Decryption key buffer
+ * @param iv       Nonce buffer
+ * @param tag      Authentication tag buffer
+ * 
+ * @return 0 on success, GCM_AUTH_FAILURE otherwise
+ */
+int check_sig(  const uint8_t *ct,
+                const size_t ct_len,
+                const uint8_t *aad,
+                const size_t aad_len,
+                const uint8_t *key,
+                const uint8_t *iv,
+                const uint8_t *tag
+            )
 {
-    int ret = 0;                // our return value
-    gcm_context ctx;            // includes the AES context structure
-    uchar ct_buf[256];          // cipher text results for comparison
-    uchar tag_buf[16];          // tag result buffer for comparison
+    
+    int err = 0;
+    gcm_context ctx;
 
-    gcm_setkey( &ctx, key, (const uint)key_len );   // setup our AES-GCM key
+    uint8_t pt[0x400];
+    size_t left = ct_len;
+    size_t part_len;
+    
+    uint8_t tag_buf[16];
+    
+    // Set Symmetric Key
+    gcm_setkey( &ctx, key, KEY_LEN );
 
-    // encrypt the NIST-provided plaintext into the local ct_buf and
-    // tag_buf ciphertext and authentication tag buffers respectively.
-    ret = gcm_crypt_and_tag( &ctx, ENCRYPT, iv, iv_len, aad, aad_len,
-                             pt, ct_buf, ct_len, tag_buf, tag_len);
-    ret |= memcmp( ct_buf, ct, ct_len );    // verify correct ciphertext
-    ret |= memcmp( tag_buf, tag, tag_len ); // verify correct authentication tag
+    // Perform Decryption    
+    gcm_start  ( &ctx, DECRYPT, iv, IV_LEN, aad, aad_len );
+    while(left) {
+        part_len = (left < sizeof(pt)) ? left : sizeof(pt);
+        gcm_update ( &ctx, part_len, ct+ct_len-left, pt );
+        left -= part_len;
+    }
+    gcm_finish ( &ctx, tag_buf, TAG_LEN );
+    
+    // Clear GCM Context
+    gcm_zero_ctx( &ctx );
 
-    gcm_zero_ctx( &ctx );       // not really necessary here, but good to do
+    //TODO rmv debug
+    uart_write(HOST_UART, tag_buf, 16);
+    uart_write(HOST_UART, tag, 16);
+    uart_write(HOST_UART, pt, 16);
 
-    return ( ret );             // return any error 'OR' generated above
+    if (!is_equal(tag_buf, tag, 16)) {
+        err = GCM_AUTH_FAILURE;
+    }
+
+    //TODO rmv debug
+    uart_write(HOST_UART, (uint8_t *)&err, 4);
+
+    memset(pt, 0, ct_len);
+
+    //TODO rmv debug
+    // uart_write(HOST_UART, "by", 2);
+
+    return err;
+
 }
-*/

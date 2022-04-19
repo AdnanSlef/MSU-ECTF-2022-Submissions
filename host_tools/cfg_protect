@@ -7,6 +7,10 @@
 import argparse
 import logging
 from pathlib import Path
+import json
+
+from Crypto.Cipher import AES
+from Crypto.Random import get_random_bytes
 
 from util import print_banner, CONFIGURATION_ROOT, LOG_FORMAT
 
@@ -15,16 +19,39 @@ log = logging.getLogger(Path(__file__).name)
 
 
 def protect_configuration(raw_cfg: Path, protected_cfg: Path):
+
     print_banner("SAFFIRe Configuration Protect Tool")
+
+    # Read in secrets
+    log.info("Reading secrets...")
+    cfg_key_file = Path("/secrets/cfg_key.bin")
+    cfg_key = cfg_key_file.read_bytes()
 
     # Read in the raw configuration binary
     log.info("Reading configuration data...")
-    file_data = raw_cfg.read_bytes()
+    cfg_data = raw_cfg.read_bytes()
+
+    # Construct the metadata
+    cfg_size = len(cfg_data)
+
+    # Encrypt firmware
+    nonce = get_random_bytes(12)
+    cipher = AES.new(cfg_key, AES.MODE_GCM, nonce=nonce)
+    ct, tag = cipher.encrypt_and_digest(cfg_data)
+
+    # Create firmware storage structure
+    data = {
+        "cfg_size": cfg_size,
+        "iv": nonce.hex(),
+        "ct": cfg_data.hex(), #TODO ct
+        "tag": tag.hex(),
+    }
 
     log.info("Packaging the configuration...")
 
     # Write to the output file
-    protected_cfg.write_bytes(file_data)
+    with protected_cfg.open("w", encoding="utf8") as fd:
+        json.dump(data, fd)
 
     log.info("Configuration protected\n")
 

@@ -61,3 +61,9 @@ def send_packets(sock: socket.socket, data: bytes):
 
         if resp != RESP_OK:
             exit(f"ERROR: Bootloader responded with {repr(resp)}")
+
+def recvall(sock: socket.socket, num: int):
+    a = b''
+    for i in range(num):
+        a += sock.recv(1)
+    return a

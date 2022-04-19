@@ -12,6 +12,10 @@
 
 #include "gcm.h"
 
+#define KEY_LEN 16
+#define IV_LEN 12
+#define TAG_LEN 16
+
 /**
  * @brief Verifies that two uint8_t[] arrays are equal to the first `len` bytes.
  * 
@@ -23,13 +27,18 @@
 int is_equal(const uint8_t *a, const uint8_t *b, const size_t len);
 
 /**
- * TODO Documentation
- * 
  * @brief Decapsulates an AEAD package, verifying authorization.
  * 
- * @param pt Buffer 
- * @return TODO 0 on success, or -1 if an invalid block address was specified or the 
- * block is write-protected.
+ * @param pt       Output buffer
+ * @param ct       Input buffer
+ * @param ct_len   Length of data
+ * @param aad      Additional authenticated data buffer
+ * @param aad_len  Length of additional authenticated data
+ * @param key      Decryption key buffer
+ * @param iv       Nonce buffer
+ * @param tag      Authentication tag buffer
+ * 
+ * @return 0 on success, GCM_AUTH_FAILURE otherwise
  */
 int aead_dec(   uint8_t *pt,
                 const uint8_t *ct,
@@ -41,4 +50,28 @@ int aead_dec(   uint8_t *pt,
                 const uint8_t *tag
             );
 
+/**
+ * @brief Verifies message authorization and integrity.
+ * 
+ * @param ct       Input buffer
+ * @param ct_len   Length of data
+ * @param aad      Additional authenticated data buffer
+ * @param aad_len  Length of additional authenticated data
+ * @param key      Decryption key buffer
+ * @param iv       Nonce buffer
+ * @param tag      Authentication tag buffer
+ * 
+ * @return 0 on success, GCM_AUTH_FAILURE otherwise
+ */
+int check_sig(  const uint8_t *ct,
+                const size_t ct_len,
+                const uint8_t *aad,
+                const size_t aad_len,
+                const uint8_t *key,
+                const uint8_t *iv,
+                const uint8_t *tag
+            );
+            
 #endif
+
+int test_function(void); //TODO rmv

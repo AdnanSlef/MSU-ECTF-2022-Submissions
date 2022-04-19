@@ -11,7 +11,7 @@ from pathlib import Path
 import socket
 import struct
 
-from util import print_banner, send_packets, RESP_OK, FIRMWARE_ROOT, LOG_FORMAT
+from util import print_banner, send_packets, recvall, RESP_OK, FIRMWARE_ROOT, LOG_FORMAT
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 log = logging.getLogger(Path(__file__).name)
@@ -27,6 +27,7 @@ def update_firmware(socket_number: int, firmware_file: Path):
         release_msg: str = data["release_msg"]
         iv = bytes.fromhex(data["iv"])
         ct = bytes.fromhex(data["ct"])
+        tag = bytes.fromhex(data["tag"])
         firmware_size = len(ct)
 
     # Connect to the bootloader
@@ -43,11 +44,12 @@ def update_firmware(socket_number: int, firmware_file: Path):
         while sock.recv(1) != b"U":
             pass
 
-        # Send the version, size, and release message
-        log.info("Sending version, size, and release message...")
+        # Send the metadata and release message
+        log.info("Sending metadata and release message...")
         payload = (
             struct.pack(">HI", version_num, firmware_size)
             + iv
+            + tag
             + release_msg.encode()
             + b"\x00"
         )
@@ -59,6 +61,22 @@ def update_firmware(socket_number: int, firmware_file: Path):
         # Send packets
         log.info("Sending firmware packets...")
         send_packets(sock, ct)
+
+        #debug
+        sign_debug = 1
+        sig_rsp = 1
+        if sign_debug:
+            tag1 = recvall(sock,16)
+            tag2 = recvall(sock,16)
+            pt2  = recvall(sock,16)
+        if sign_debug:
+            log.info(f"Tags are {repr(tag1)} and {repr(tag2)}")
+            log.info(f"pt: {repr(pt2)}")
+        if sig_rsp:
+            response = recvall(sock,4)
+            log.info(f"Firmware Update Sig Response: {repr(response)}")
+            # response = sock.recv(4)
+            # log.info(f"Firmware Update Sig Response: {repr(response)}")
 
         log.info("Firmware updated\n")
 
