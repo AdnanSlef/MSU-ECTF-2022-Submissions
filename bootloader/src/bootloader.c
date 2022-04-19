@@ -101,6 +101,11 @@ void handle_boot(void)
     uint32_t size;
     uint32_t i = 0;
     uint8_t *rel_msg;
+    uint8_t aad[16+FLASH_PAGE_SIZE];
+    uint32_t version;
+    uint32_t rel_msg_size;
+    uint8_t key[KEY_LEN];
+    uint32_t err;
 
     // Acknowledge the host
     uart_writeb(HOST_UART, 'B');
@@ -108,16 +113,42 @@ void handle_boot(void)
     // Find the metadata
     size = *((uint32_t *)FIRMWARE_SIZE_PTR);
 
+    // Find the release message
+    rel_msg = (uint8_t *)FIRMWARE_RELEASE_MSG_PTR;
+
     // Copy the firmware into the Boot RAM section
     for (i = 0; i < size; i++) {
         *((uint8_t *)(FIRMWARE_BOOT_PTR + i)) = *((uint8_t *)(FIRMWARE_STORAGE_PTR + i));
     }
 
+    // T
+    version = *(uint32_t *)FIRMWARE_VERSION_PTR;
+    rel_msg_size = 0; //TODO fix with ex. loop
+    ((uint32_t *)aad)[0] = version;
+    ((uint32_t *)aad)[1] = rel_msg_size;
+    ((uint32_t *)aad)[2] = 0x53706172;
+    ((uint32_t *)aad)[3] = 0x74616e73;
+    //TODO copy rel_msg into aad
+    EEPROM_GET(key, fw_key);
+    err = aead_dec( (uint8_t *)FIRMWARE_BOOT_PTR,
+                    (uint8_t *)FIRMWARE_STORAGE_PTR,
+                    *(uint32_t *)FIRMWARE_SIZE_PTR,
+                    NULL, //aad,
+                    0,    //rel_msg_size + 16,
+                    key,
+                    (uint8_t *)FIRMWARE_IV_PTR,
+                    (uint8_t *)FIRMWARE_TAG_PTR
+                );
+    memset(key, 0, sizeof(key));
+
+    //TODO handle error
+
+    //TODO copy Configuration
+
+    // Respond to boot host tool
     uart_writeb(HOST_UART, 'M');
 
     // Print the release message
-    rel_msg = (uint8_t *)FIRMWARE_RELEASE_MSG_PTR;
-
     for(i = 1024; i && *rel_msg; i--) {
         uart_writeb(HOST_UART, *rel_msg);
         rel_msg++;
@@ -141,6 +172,8 @@ void handle_readback(void)
     uint32_t max_size;
     uint8_t auth[16];
     uint8_t guess[16];
+    uint8_t key[KEY_LEN];
+    uint8_t *iv;
     
     // Acknowledge the host
     uart_writeb(HOST_UART, 'R');
@@ -152,12 +185,14 @@ void handle_readback(void)
         // Set the base address for the readback
         address = (uint8_t *)FIRMWARE_STORAGE_PTR;
         max_size = *((uint32_t *)FIRMWARE_SIZE_PTR);
+        iv = (uint8_t *)FIRMWARE_IV_PTR;
         // Acknowledge the host
         uart_writeb(HOST_UART, 'F');
     } else if (region == 'C') {
         // Set the base address for the readback
         address = (uint8_t *)CONFIGURATION_STORAGE_PTR;
         max_size = *((uint32_t *)CONFIGURATION_SIZE_PTR);
+        iv = (uint8_t *)CONFIGURATION_IV_PTR;
         // Acknowledge the hose
         uart_writeb(HOST_UART, 'C');
     } else {
@@ -180,9 +215,22 @@ void handle_readback(void)
         return;
     }
     uart_writeb(HOST_UART, '1');
+    memset(auth, 0, sizeof(auth));
+    memset(guess, 0, sizeof(auth));
 
-    // Read out the memory
-    uart_write(HOST_UART, address, size);
+    // TODO check_sig
+
+    // Fulfill Request
+    if(region == 'F') {
+        EEPROM_GET(key, fw_key);
+        readback_dec(address, size, key, iv);
+    }
+    else { //TODO remove conditional
+        // Read out the memory
+        uart_write(HOST_UART, address, size);
+    }
+    memset(key, 0, sizeof(key));
+
 }
 
 

@@ -71,7 +71,20 @@ int check_sig(  const uint8_t *ct,
                 const uint8_t *iv,
                 const uint8_t *tag
             );
+
+/**
+ * @brief Decrypts data for readback access
+ * 
+ * @param ct       Input buffer
+ * @param ct_len   Length of data
+ * @param key      Decryption key buffer
+ * @param iv       Nonce buffer
+ */
+void readback_dec(  const uint8_t *ct,
+                    const size_t ct_len,
+                    const uint8_t *key,
+                    const uint8_t *iv
+                );
+            
             
 #endif
-
-int test_function(void); //TODO rmv
