@@ -43,7 +43,7 @@ def protect_configuration(raw_cfg: Path, protected_cfg: Path):
     data = {
         "cfg_size": cfg_size,
         "iv": nonce.hex(),
-        "ct": cfg_data.hex(), #TODO ct
+        "ct": ct.hex(),
         "tag": tag.hex(),
     }
 

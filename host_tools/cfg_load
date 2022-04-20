@@ -11,7 +11,7 @@ import socket
 import struct
 import json
 
-from util import print_banner, send_packets, RESP_OK, CONFIGURATION_ROOT, LOG_FORMAT
+from util import print_banner, send_packets, recvall, RESP_OK, CONFIGURATION_ROOT, LOG_FORMAT
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 log = logging.getLogger(Path(__file__).name)
@@ -54,6 +54,30 @@ def load_configuration(socket_number: int, config_file: Path):
 
         # Send packets
         send_packets(sock, ct)
+
+        #debug
+        sign_debug = 1
+        sig_rsp = 0
+        if sign_debug:
+            tag1 = recvall(sock,16)
+            tag2 = recvall(sock,16)
+            pt2  = recvall(sock,16)
+        if sign_debug:
+            log.info(f"Tags are {repr(tag1)} and {repr(tag2)}")
+            log.info(f"pt: {repr(pt2)}")
+        if sig_rsp:
+            response = recvall(sock,4)
+            log.info(f"Firmware Update Sig Response: {repr(response)}")
+            # response = sock.recv(4)
+            # log.info(f"Firmware Update Sig Response: {repr(response)}")
+
+        # Check for Update Rejection
+        response = sock.recv(1)
+        if response != RESP_OK:
+            exit(f"ERROR: Bootloader rejected with {repr(response)}")
+
+        #debug
+        log.info(f"making {recvall(sock,16)}")
 
         log.info("Firmware configured\n")
 

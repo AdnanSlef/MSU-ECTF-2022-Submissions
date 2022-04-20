@@ -64,7 +64,7 @@ def update_firmware(socket_number: int, firmware_file: Path):
 
         #debug
         sign_debug = 1
-        sig_rsp = 1
+        sig_rsp = 0
         if sign_debug:
             tag1 = recvall(sock,16)
             tag2 = recvall(sock,16)

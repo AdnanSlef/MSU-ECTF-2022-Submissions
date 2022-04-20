@@ -111,6 +111,21 @@ struct eeprom_s {
     EEPROMRead( (uint32_t *) &(dst), offsetof(struct eeprom_s, obj), sizeof((dst)));\
 } while(0)
 
+/**
+ * @brief Wipes temporary data
+ */
+void clear_temp(void)
+{
+    int i;
+
+    // Wipe Flash Temp
+    for(i = 0; i < 64; i++) {
+        flash_erase_page(TEMP_MEM_PTR + FLASH_PAGE_SIZE * i);
+    }
+
+    // Wipe SRAM Temp
+    memset((void *)TEMP_METADATA_PTR, 0, FLASH_PAGE_SIZE * 2);
+}
 
 /**
  * @brief Copy data and program to flash memory.
@@ -195,6 +210,9 @@ void handle_boot(void)
 
     // Acknowledge the host
     uart_writeb(HOST_UART, 'B');
+    
+    // Wipe temporary storage
+    clear_temp();
 
     // Find the metadata
     size = *((uint32_t *)FIRMWARE_SIZE_PTR);
@@ -235,8 +253,6 @@ void handle_boot(void)
 
     //TODO handle error
 
-    //TODO Wipe temporary storage
-
     // Get Configuration Metadata
     size = *(uint32_t *)CONFIGURATION_SIZE_PTR;
     
@@ -247,8 +263,20 @@ void handle_boot(void)
     }
 
     // Copy Configuration into boot location
-    copy_data_flash((uint32_t) CONFIGURATION_BOOT_PTR, (uint8_t *)CONFIGURATION_STORAGE_PTR, size);
+    // copy_data_flash((uint32_t) CONFIGURATION_BOOT_PTR, (uint8_t *)CONFIGURATION_STORAGE_PTR, size);
     //TODO decrypt instead
+    // Decapsulate Protected Configuration
+    EEPROM_GET(key, cfg_key);
+    err = flash_dec( CONFIGURATION_BOOT_PTR,
+                    (uint8_t *)CONFIGURATION_STORAGE_PTR,
+                    *(uint32_t *)CONFIGURATION_SIZE_PTR,
+                    NULL,
+                    0,
+                    key,
+                    (uint8_t *)CONFIGURATION_IV_PTR,
+                    (uint8_t *)CONFIGURATION_TAG_PTR
+                );
+    memset(key, 0, sizeof(key));
 
     // Handle Error
     if(err) {
@@ -296,14 +324,18 @@ void handle_readback(void)
         // Set the base address for the readback
         address = (uint8_t *)FIRMWARE_STORAGE_PTR;
         max_size = *((uint32_t *)FIRMWARE_SIZE_PTR);
+        max_size = max_size > FLASH_PAGE_SIZE*16 ? FLASH_PAGE_SIZE*16 : max_size;
         iv = (uint8_t *)FIRMWARE_IV_PTR;
+        EEPROM_GET(key, fw_key);
         // Acknowledge the host
         uart_writeb(HOST_UART, 'F');
     } else if (region == 'C') {
         // Set the base address for the readback
         address = (uint8_t *)CONFIGURATION_STORAGE_PTR;
         max_size = *((uint32_t *)CONFIGURATION_SIZE_PTR);
+        max_size = max_size > FLASH_PAGE_SIZE*64 ? FLASH_PAGE_SIZE*64 : max_size;
         iv = (uint8_t *)CONFIGURATION_IV_PTR;
+        EEPROM_GET(key, cfg_key);
         // Acknowledge the hose
         uart_writeb(HOST_UART, 'C');
     } else {
@@ -330,16 +362,8 @@ void handle_readback(void)
     memset(guess, 0, sizeof(auth));
 
     // Fulfill Request
-    if(region == 'F') {
-        EEPROM_GET(key, fw_key);
-        readback_dec(address, size, key, iv);
-    }
-    else { //TODO remove conditional
-        // Read out the memory
-        uart_write(HOST_UART, address, size);
-    }
+    readback_dec(address, size, key, iv);
     memset(key, 0, sizeof(key));
-
 }
 
 /**
@@ -464,18 +488,17 @@ void handle_update(void)
                     tag
                 );
     memset(key, 0, KEY_LEN);
-    uart_write(HOST_UART, (uint8_t *)&err, 4);//todo rmv
+    // uart_write(HOST_UART, (uint8_t *)&err, 4);//todo rmv
 
     // Handle Invalid Signature
     if(err) {
         uart_writeb(HOST_UART, 'E');
-        //TODO clear temp
+        clear_temp();
         return;
     }
 
     // Accept Firmware Update
     copy_data_flash(FIRMWARE_STORAGE_PTR, (uint8_t *)TEMP_MEM_PTR, size);
-    // copy_data_flash(FIRMWARE_STORAGE_PTR, (uint8_t *)FIRMWARE_STORAGE_PTR, size);
     uart_writeb(HOST_UART, FRAME_OK);
 }
 
@@ -516,21 +539,14 @@ void handle_configure(void)
         uart_writeb(HOST_UART, FRAME_BAD);
         return;
     }
-
-    // Write Configuration Metadata
-    flash_erase_page(CONFIGURATION_METADATA_PTR);
-    flash_write_word(size, CONFIGURATION_SIZE_PTR);
-    flash_write((uint32_t *)iv, CONFIGURATION_IV_PTR, IV_LEN >> 2);
-    flash_write((uint32_t *)tag, CONFIGURATION_TAG_PTR, TAG_LEN >> 2);
-
     uart_writeb(HOST_UART, FRAME_OK);
     
     // Retrieve configuration
-    load_data(HOST_UART, CONFIGURATION_STORAGE_PTR, size);
+    load_data(HOST_UART, TEMP_MEM_PTR, size);
 
     // Check signature
     EEPROM_GET(key, cfg_key);
-    err = check_sig( (uint8_t *)FIRMWARE_STORAGE_PTR,
+    err = check_sig( (uint8_t *)TEMP_MEM_PTR,
                     size,
                     NULL,
                     0,
@@ -539,9 +555,24 @@ void handle_configure(void)
                     tag
                 );
     memset(key, 0, KEY_LEN);
-    uart_write(HOST_UART, (uint8_t *)&err, 4);//todo rmv
 
-    // TODO handle error
+    // Handle Invalid Signature
+    if(err) {
+        uart_writeb(HOST_UART, 'E');
+        clear_temp();
+        return;
+    }
+
+    // Write Configuration Metadata
+    flash_erase_page(CONFIGURATION_METADATA_PTR);
+    flash_write_word(size, CONFIGURATION_SIZE_PTR);
+    flash_write((uint32_t *)iv, CONFIGURATION_IV_PTR, IV_LEN >> 2);
+    flash_write((uint32_t *)tag, CONFIGURATION_TAG_PTR, TAG_LEN >> 2);
+    
+    // Accept Configuration Update
+    copy_data_flash(CONFIGURATION_STORAGE_PTR, (uint8_t *)TEMP_MEM_PTR, size);
+    uart_writeb(HOST_UART, FRAME_OK);
+    uart_write(HOST_UART, (uint8_t *)CONFIGURATION_STORAGE_PTR, 16);
 }
 
 /**

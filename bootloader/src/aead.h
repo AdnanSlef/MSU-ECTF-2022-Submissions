@@ -47,8 +47,7 @@ int aead_dec(   uint8_t *pt,
                 const size_t aad_len,
                 const uint8_t *key,
                 const uint8_t *iv,
-                const uint8_t *tag
-            );
+                const uint8_t *tag    );
 
 /**
  * @brief Verifies message authorization and integrity.
@@ -69,8 +68,7 @@ int check_sig(  const uint8_t *ct,
                 const size_t aad_len,
                 const uint8_t *key,
                 const uint8_t *iv,
-                const uint8_t *tag
-            );
+                const uint8_t *tag    );
 
 /**
  * @brief Decrypts data for readback access
@@ -83,8 +81,29 @@ int check_sig(  const uint8_t *ct,
 void readback_dec(  const uint8_t *ct,
                     const size_t ct_len,
                     const uint8_t *key,
-                    const uint8_t *iv
-                );
-            
-            
+                    const uint8_t *iv    );
+
+/**
+ * @brief Decrypts data into flash
+ * 
+ * @param flash    Output address
+ * @param ct       Input buffer
+ * @param ct_len   Length of data
+ * @param aad      Additional authenticated data buffer
+ * @param aad_len  Length of additional authenticated data
+ * @param key      Decryption key buffer
+ * @param iv       Nonce buffer
+ * @param tag      Authentication tag buffer
+ * 
+ * @return 0 on success, GCM_AUTH_FAILURE otherwise
+ */
+int flash_dec(  uint32_t flash,
+                const uint8_t *ct,
+                const size_t ct_len,
+                const uint8_t *aad,
+                const size_t aad_len,
+                const uint8_t *key,
+                const uint8_t *iv,
+                const uint8_t *tag    );
+
 #endif
