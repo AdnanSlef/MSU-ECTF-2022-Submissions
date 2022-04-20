@@ -62,21 +62,20 @@ def update_firmware(socket_number: int, firmware_file: Path):
         log.info("Sending firmware packets...")
         send_packets(sock, ct)
 
-        #debug
+        #debug TODO
         sign_debug = 1
-        sig_rsp = 0
         if sign_debug:
             tag1 = recvall(sock,16)
             tag2 = recvall(sock,16)
             pt2  = recvall(sock,16)
-        if sign_debug:
+            aad1 = recvall(sock,16)
             log.info(f"Tags are {repr(tag1)} and {repr(tag2)}")
+            log.info(f"AAD is {repr(aad1)}")
             log.info(f"pt: {repr(pt2)}")
-        if sig_rsp:
-            response = recvall(sock,4)
-            log.info(f"Firmware Update Sig Response: {repr(response)}")
-            # response = sock.recv(4)
-            # log.info(f"Firmware Update Sig Response: {repr(response)}")
+
+        #toDO
+        msgback = recvall(sock,16)
+        log.info(f"msgback: {repr(msgback)}")
 
         # Check for Update Rejection
         response = sock.recv(1)

@@ -1,19 +1,14 @@
 /**
  * @file bootloader.c
- * @author Kyle Scaplen
+ * @author Spartans
  * @brief Bootloader implementation
  * @date 2022
- * 
- * This source file is part of an example system for MITRE's 2022 Embedded System CTF (eCTF).
- * This code is being provided only for educational purposes for the 2022 MITRE eCTF competition,
- * and may not meet MITRE standards for quality. Use this code at your own risk!
- * 
- * @copyright Copyright (c) 2022 The MITRE Corporation
  */
 
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include "driverlib/interrupt.h"
 #include "flash.h"
@@ -27,18 +22,6 @@
 #ifdef DO_MAKE_SWEET_B
 #include "sb_all.h"
 #endif
-
-#ifdef TEST_GCM
-#include "string.h"
-uint8_t gcm_debug[256];
-#endif
-
-#ifdef TEST_SB
-#include "string.h"
-uint8_t sb_debug[257] = {0};
-#endif
-
-#define TEST_EEPROM
 
 // Firmware update constants
 #define FRAME_OK 0x00
@@ -57,6 +40,7 @@ uint8_t sb_debug[257] = {0};
  *      Tag:      0x00024410 : 0x00024420 (16B)
  *      Version:  0x00024420 : 0x00024424 (4B)
  *      Msg:      0x00024800 : 0x00024C00 (1KB)
+ *      Msg:      0x00024C00 : 0x00024C04 (4B)
  *      Fw_Boot:  0x20004000 : 0x20008000 (16KB)
  * Configuration:
  *      Ct:       0x00010000 : 0x00020000 (64KB)
@@ -88,6 +72,7 @@ uint8_t sb_debug[257] = {0};
 #define FIRMWARE_TAG_PTR           ((uint32_t)(FIRMWARE_METADATA_PTR + 16))
 #define FIRMWARE_VERSION_PTR       ((uint32_t)(FIRMWARE_METADATA_PTR + 32))
 #define FIRMWARE_RELEASE_MSG_PTR   ((uint32_t)(FIRMWARE_METADATA_PTR + FLASH_PAGE_SIZE))
+#define FIRMWARE_RELEASE_SIZE_PTR  ((uint32_t)(FIRMWARE_METADATA_PTR + FLASH_PAGE_SIZE*2))
 #define FIRMWARE_BOOT_PTR          ((uint32_t)0x20004000)
 
 #define TEMP_MEM_PTR CONFIGURATION_BOOT_PTR
@@ -110,6 +95,8 @@ struct eeprom_s {
     EEPROMInit();\
     EEPROMRead( (uint32_t *) &(dst), offsetof(struct eeprom_s, obj), sizeof((dst)));\
 } while(0)
+
+
 
 /**
  * @brief Wipes temporary data
@@ -231,27 +218,30 @@ void handle_boot(void)
     rel_msg_size = 1024 - i;
     rel_msg -= rel_msg_size;
 
-    // Decapsulate Protected Firmware
+    // Decapsulate Protected Firmware for boot
     version = *(uint32_t *)FIRMWARE_VERSION_PTR;
     ((uint32_t *)aad)[0] = version;
-    ((uint32_t *)aad)[1] = rel_msg_size;
+    ((uint32_t *)aad)[1] = *(uint32_t *)FIRMWARE_RELEASE_SIZE_PTR; //rel_msg_size
     ((uint32_t *)aad)[2] = SPAR;
     ((uint32_t *)aad)[3] = TANS;
-    //TODO copy rel_msg into aad
-    //TODO AAD
+    memcpy(aad+16, rel_msg, rel_msg_size);
     EEPROM_GET(key, fw_key);
     err = aead_dec( (uint8_t *)FIRMWARE_BOOT_PTR,
                     (uint8_t *)FIRMWARE_STORAGE_PTR,
                     *(uint32_t *)FIRMWARE_SIZE_PTR,
-                    NULL, //aad,
-                    0,    //rel_msg_size + 16,
+                    aad,
+                    16,
                     key,
                     (uint8_t *)FIRMWARE_IV_PTR,
                     (uint8_t *)FIRMWARE_TAG_PTR
                 );
     memset(key, 0, sizeof(key));
 
-    //TODO handle error
+    // Handle Error
+    if(err) {
+        uart_writeb(HOST_UART, 'E');
+        return;
+    }
 
     // Get Configuration Metadata
     size = *(uint32_t *)CONFIGURATION_SIZE_PTR;
@@ -262,10 +252,7 @@ void handle_boot(void)
         return;
     }
 
-    // Copy Configuration into boot location
-    // copy_data_flash((uint32_t) CONFIGURATION_BOOT_PTR, (uint8_t *)CONFIGURATION_STORAGE_PTR, size);
-    //TODO decrypt instead
-    // Decapsulate Protected Configuration
+    // Decapsulate Protected Configuration for boot
     EEPROM_GET(key, cfg_key);
     err = flash_dec( CONFIGURATION_BOOT_PTR,
                     (uint8_t *)CONFIGURATION_STORAGE_PTR,
@@ -383,6 +370,7 @@ void handle_update(void)
     uint32_t rel_msg_write_size = 0;
     uint32_t iter;
     int err;
+    int i;
 
     // Acknowledge the host
     uart_writeb(HOST_UART, 'U');
@@ -408,7 +396,7 @@ void handle_update(void)
     }
 
     // Receive release message
-    rel_msg_size = uart_readline(HOST_UART, rel_msg, sizeof(aad)-16) + 1; // Include terminator
+    rel_msg_size = uart_readline(HOST_UART, rel_msg, sizeof(aad)-16) + 1;
 
     // Reject invalid size
     if (size > FLASH_PAGE_SIZE * 16) {
@@ -421,11 +409,50 @@ void handle_update(void)
     if (current_version == 0xFFFFFFFF) {
         current_version = (uint32_t)OLDEST_VERSION;
     }
-
-    // Reject invalid versions (TODO authenticate version)
     if ((version != 0) && (version < current_version) || (version > 0xFFFF)) {
         // Version is not acceptable
         uart_writeb(HOST_UART, FRAME_BAD);
+        return;
+    }
+
+    // Acknowledge
+    uart_writeb(HOST_UART, FRAME_OK);
+    
+    // Retrieve firmware
+    load_data(HOST_UART, TEMP_MEM_PTR, size);
+
+    // Calculate release message length
+    for(i = 1024; i && *rel_msg; i--) {rel_msg++;}
+    rel_msg_size = 1024 - i;
+    rel_msg -= rel_msg_size;
+
+    // Adjust write size
+    rel_msg_write_size = rel_msg_size;
+    if(rel_msg_size != FLASH_PAGE_SIZE) rel_msg_write_size++;
+    if(rel_msg_write_size % 4) {
+        rel_msg_write_size += 4 - (rel_msg_size % 4);
+    }
+
+    // Check signature
+    ((uint32_t *)aad)[0] = version;
+    ((uint32_t *)aad)[1] = rel_msg_size;
+    ((uint32_t *)aad)[2] = SPAR;
+    ((uint32_t *)aad)[3] = TANS;
+    EEPROM_GET(key, fw_key);
+    err = check_sig( (uint8_t *)TEMP_MEM_PTR,
+                    size,
+                    aad,
+                    16,
+                    key,
+                    iv,
+                    tag
+                );
+    memset(key, 0, KEY_LEN);
+
+    // Handle Invalid Signature
+    if(err) {
+        uart_writeb(HOST_UART, 'E');
+        clear_temp();
         return;
     }
 
@@ -434,6 +461,7 @@ void handle_update(void)
 
     // Save metadata
     flash_write_word(size, FIRMWARE_SIZE_PTR);
+    flash_write_word(rel_msg_size, FIRMWARE_RELEASE_SIZE_PTR);
     flash_write((uint32_t *)iv, FIRMWARE_IV_PTR, IV_LEN >> 2);
     flash_write((uint32_t *)tag, FIRMWARE_TAG_PTR, TAG_LEN >> 2);
 
@@ -453,49 +481,9 @@ void handle_update(void)
     // Clear release message
     flash_erase_page(FIRMWARE_RELEASE_MSG_PTR);
 
-    // Adjust write size
-    if(rel_msg_size > FLASH_PAGE_SIZE) {
-        rel_msg_size = FLASH_PAGE_SIZE;
-    }
-    rel_msg_write_size = rel_msg_size;
-    if(rel_msg_write_size % 4) {
-        rel_msg_write_size += 4 - (rel_msg_size % 4);;
-    }
-
     // Write release message
     flash_write((uint32_t *)rel_msg, FIRMWARE_RELEASE_MSG_PTR, rel_msg_write_size >> 2);
-
-    // Acknowledge
-    uart_writeb(HOST_UART, FRAME_OK);
-    
-    // Retrieve firmware
-    load_data(HOST_UART, TEMP_MEM_PTR, size);
-    // load_data(HOST_UART, FIRMWARE_STORAGE_PTR, size);
-
-    // Check signature
-    ((uint32_t *)aad)[0] = version;
-    ((uint32_t *)aad)[1] = rel_msg_size;
-    ((uint32_t *)aad)[2] = SPAR;
-    ((uint32_t *)aad)[3] = TANS;
-    EEPROM_GET(key, fw_key);
-    // err = check_sig( (uint8_t *)FIRMWARE_STORAGE_PTR,
-    err = check_sig( (uint8_t *)TEMP_MEM_PTR,
-                    size,
-                    NULL, //aad,
-                    0,    //rel_msg_size + 16,
-                    key,
-                    iv,
-                    tag
-                );
-    memset(key, 0, KEY_LEN);
-    // uart_write(HOST_UART, (uint8_t *)&err, 4);//todo rmv
-
-    // Handle Invalid Signature
-    if(err) {
-        uart_writeb(HOST_UART, 'E');
-        clear_temp();
-        return;
-    }
+    uart_write(HOST_UART, (uint8_t *)FIRMWARE_RELEASE_MSG_PTR, 16);
 
     // Accept Firmware Update
     copy_data_flash(FIRMWARE_STORAGE_PTR, (uint8_t *)TEMP_MEM_PTR, size);

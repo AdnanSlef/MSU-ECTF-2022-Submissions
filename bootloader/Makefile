@@ -14,7 +14,7 @@ CFLAGSgcc=-DTARGET_IS_TM4C123_RB1
 ROOT=.
 
 # Uncomment to enable debug symbols
-DEBUG=1
+# DEBUG=1
 
 # additional base directories
 TIVA_ROOT=${ROOT}/lib/tivaware
@@ -78,7 +78,7 @@ VPATH+=${SBPATH}/include
 IPATH+=${SBPATH}/include
 IPATH+=${SBPATH}/src
 
-# TODO limit word size to fit processor
+# limit word size to fit processor
 #CFLAGS+=-DSB_WORD_SIZE=2
 
 #disable the unused curve
@@ -90,8 +90,8 @@ ${COMPILER}/bootloader.axf: ${COMPILER}/sb_sha256.o ${COMPILER}/sb_fe.o ${COMPIL
 endif
 ################   end   digital signature ################
 
-#TODO optimize for speed
-#CFLAGS+=-O2
+# optimize for speed
+# CFLAGS+=-O2
 
 # build libraries
 ${TIVA_ROOT}/driverlib/${COMPILER}/libdriver.a:

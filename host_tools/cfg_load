@@ -55,21 +55,14 @@ def load_configuration(socket_number: int, config_file: Path):
         # Send packets
         send_packets(sock, ct)
 
-        #debug
+        #debug TODO
         sign_debug = 1
-        sig_rsp = 0
         if sign_debug:
             tag1 = recvall(sock,16)
             tag2 = recvall(sock,16)
             pt2  = recvall(sock,16)
-        if sign_debug:
             log.info(f"Tags are {repr(tag1)} and {repr(tag2)}")
             log.info(f"pt: {repr(pt2)}")
-        if sig_rsp:
-            response = recvall(sock,4)
-            log.info(f"Firmware Update Sig Response: {repr(response)}")
-            # response = sock.recv(4)
-            # log.info(f"Firmware Update Sig Response: {repr(response)}")
 
         # Check for Update Rejection
         response = sock.recv(1)

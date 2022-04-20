@@ -40,16 +40,11 @@ def protect_firmware(
     # Encrypt firmware
     nonce = get_random_bytes(12)
     cipher = AES.new(fw_key, AES.MODE_GCM, nonce=nonce)
-    aad = ( version.to_bytes(4, 'big')
-          + len(release_message).to_bytes(4, 'big')
+    aad = ( version.to_bytes(4, 'little')
+          + len(release_message).to_bytes(4, 'little')
           + b'Spartans')
-    """"
-          + release_message.encode() 
-          )
-    if len(release_message) != 1024:
-        aad += b'\x00'
-    """
-    # cipher.update(aad)
+    #aad += release_message.encode()
+    cipher.update(aad)
     ct, tag = cipher.encrypt_and_digest(firmware_data)
 
     # Create firmware storage structure
