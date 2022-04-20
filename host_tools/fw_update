@@ -78,6 +78,11 @@ def update_firmware(socket_number: int, firmware_file: Path):
             # response = sock.recv(4)
             # log.info(f"Firmware Update Sig Response: {repr(response)}")
 
+        # Check for Update Rejection
+        response = sock.recv(1)
+        if response != RESP_OK:
+            exit(f"ERROR: Bootloader rejected with {repr(response)}")
+        
         log.info("Firmware updated\n")
 
 

@@ -44,6 +44,9 @@ uint8_t sb_debug[257] = {0};
 #define FRAME_OK 0x00
 #define FRAME_BAD 0x01
 
+#define SPAR 0x72617053
+#define TANS 0x736e6174
+
 // Storage Layout
 
 /*
@@ -61,15 +64,22 @@ uint8_t sb_debug[257] = {0};
  *      IV:       0x00020004 : 0x00020010 (12B)
  *      Tag:      0x00020010 : 0x00020020 (16B)
  *      Cfg_Boot: 0x00030000 : 0x00040000 (64KB)
+ * Temporary:
+ *      Mem:      0x00030000 : 0x00040000 (64KB)
+ *      Size:     0x20004000 : 0x20004004 (4B)
+ *      IV:       0x20004004 : 0x20004010 (12B)
+ *      Tag:      0x20004010 : 0x20004020 (16B)
+ *      Version:  0x20004020 : 0x20004024 (4B)
+ *      Msg:      0x20004400 : 0x20004800 (1KB)
  */
 
 
-#define CONFIGURATION_CT_PTR       ((uint32_t)(FLASH_START + 0x00010000)) //TODO STORAGE_PTR
-#define CONFIGURATION_METADATA_PTR ((uint32_t)(CONFIGURATION_CT_PTR + (FLASH_PAGE_SIZE*64)))
+#define CONFIGURATION_STORAGE_PTR  ((uint32_t)(FLASH_START + 0x00010000))
+#define CONFIGURATION_METADATA_PTR ((uint32_t)(CONFIGURATION_STORAGE_PTR + (FLASH_PAGE_SIZE*64)))
 #define CONFIGURATION_SIZE_PTR     ((uint32_t)(CONFIGURATION_METADATA_PTR + 0))
 #define CONFIGURATION_IV_PTR       ((uint32_t)(CONFIGURATION_METADATA_PTR + 4))
 #define CONFIGURATION_TAG_PTR      ((uint32_t)(CONFIGURATION_METADATA_PTR + 16))
-#define CONFIGURATION_STORAGE_PTR  ((uint32_t)(CONFIGURATION_CT_PTR + (FLASH_PAGE_SIZE*128))) //TODO BOOT_PTR
+#define CONFIGURATION_BOOT_PTR     ((uint32_t)(CONFIGURATION_STORAGE_PTR + (FLASH_PAGE_SIZE*128)))
 
 #define FIRMWARE_STORAGE_PTR       ((uint32_t)(CONFIGURATION_METADATA_PTR + FLASH_PAGE_SIZE))
 #define FIRMWARE_METADATA_PTR      ((uint32_t)(FIRMWARE_STORAGE_PTR + (FLASH_PAGE_SIZE*16)))
@@ -79,6 +89,15 @@ uint8_t sb_debug[257] = {0};
 #define FIRMWARE_VERSION_PTR       ((uint32_t)(FIRMWARE_METADATA_PTR + 32))
 #define FIRMWARE_RELEASE_MSG_PTR   ((uint32_t)(FIRMWARE_METADATA_PTR + FLASH_PAGE_SIZE))
 #define FIRMWARE_BOOT_PTR          ((uint32_t)0x20004000)
+
+#define TEMP_MEM_PTR CONFIGURATION_BOOT_PTR
+#define TEMP_METADATA_PTR FIRMWARE_BOOT_PTR
+#define TEMP_SIZE_PTR              ((uint32_t)(TEMP_METADATA_PTR + 0))
+#define TEMP_IV_PTR                ((uint32_t)(TEMP_METADATA_PTR + 4))
+#define TEMP_TAG_PTR               ((uint32_t)(TEMP_METADATA_PTR + 16))
+#define TEMP_VERSION_PTR           ((uint32_t)(TEMP_METADATA_PTR + 32))
+#define TEMP_RELEASE_MSG_PTR       ((uint32_t)(TEMP_METADATA_PTR + FLASH_PAGE_SIZE))
+
 
 // EEPROM Layout
 struct eeprom_s {
@@ -94,6 +113,73 @@ struct eeprom_s {
 
 
 /**
+ * @brief Copy data and program to flash memory.
+ * 
+ * @param dst is the starting page address to store the data.
+ * @param src is the address to copy data from.
+ * @param size is the number of bytes to copy.
+ */
+void copy_data_flash(uint32_t dst, const uint8_t * src, uint32_t size)
+{
+    int i;
+    uint32_t frame_size;
+    uint8_t page_buffer[FLASH_PAGE_SIZE];
+
+    while(size > 0) {
+        // calculate frame size
+        frame_size = size > FLASH_PAGE_SIZE ? FLASH_PAGE_SIZE : size;
+        // read frame into buffer
+        memcpy(page_buffer, src, frame_size);
+        // pad buffer if frame is smaller than the page
+        for(i = frame_size; i < FLASH_PAGE_SIZE; i++) {
+            page_buffer[i] = 0xFF;
+        }
+        // clear flash page
+        flash_erase_page(dst);
+        // write flash page
+        flash_write((uint32_t *)page_buffer, dst, FLASH_PAGE_SIZE >> 2);
+        // next page and decrease size
+        dst += FLASH_PAGE_SIZE;
+        src += FLASH_PAGE_SIZE;
+        size -= frame_size;
+    }
+}
+
+/**
+ * @brief Read data from a UART interface and program to flash memory.
+ * 
+ * @param interface is the base address of the UART interface to read from.
+ * @param dst is the starting page address to store the data.
+ * @param size is the number of bytes to load.
+ */
+void load_data(uint32_t interface, uint32_t dst, uint32_t size)
+{
+    int i;
+    uint32_t frame_size;
+    uint8_t page_buffer[FLASH_PAGE_SIZE];
+
+    while(size > 0) {
+        // calculate frame size
+        frame_size = size > FLASH_PAGE_SIZE ? FLASH_PAGE_SIZE : size;
+        // read frame into buffer
+        uart_read(HOST_UART, page_buffer, frame_size);
+        // pad buffer if frame is smaller than the page
+        for(i = frame_size; i < FLASH_PAGE_SIZE; i++) {
+            page_buffer[i] = 0xFF;
+        }
+        // clear flash page
+        flash_erase_page(dst);
+        // write flash page
+        flash_write((uint32_t *)page_buffer, dst, FLASH_PAGE_SIZE >> 2);
+        // next page and decrease size
+        dst += FLASH_PAGE_SIZE;
+        size -= frame_size;
+        // send frame ok
+        uart_writeb(HOST_UART, FRAME_OK);
+    }
+}
+
+/**
  * @brief Boot the firmware.
  */
 void handle_boot(void)
@@ -105,7 +191,7 @@ void handle_boot(void)
     uint32_t version;
     uint32_t rel_msg_size;
     uint8_t key[KEY_LEN];
-    uint32_t err;
+    int err;
 
     // Acknowledge the host
     uart_writeb(HOST_UART, 'B');
@@ -113,22 +199,28 @@ void handle_boot(void)
     // Find the metadata
     size = *((uint32_t *)FIRMWARE_SIZE_PTR);
 
+    // Reject invalid size
+    if (size > FLASH_PAGE_SIZE * 16) {
+        uart_writeb(HOST_UART, 'E');
+        return;
+    }
+
     // Find the release message
     rel_msg = (uint8_t *)FIRMWARE_RELEASE_MSG_PTR;
 
-    // Copy the firmware into the Boot RAM section
-    for (i = 0; i < size; i++) {
-        *((uint8_t *)(FIRMWARE_BOOT_PTR + i)) = *((uint8_t *)(FIRMWARE_STORAGE_PTR + i));
-    }
+    // Calculate release message length
+    for(i = 1024; i && *rel_msg; i--) {rel_msg++;}
+    rel_msg_size = 1024 - i;
+    rel_msg -= rel_msg_size;
 
-    // T
+    // Decapsulate Protected Firmware
     version = *(uint32_t *)FIRMWARE_VERSION_PTR;
-    rel_msg_size = 0; //TODO fix with ex. loop
     ((uint32_t *)aad)[0] = version;
     ((uint32_t *)aad)[1] = rel_msg_size;
-    ((uint32_t *)aad)[2] = 0x53706172;
-    ((uint32_t *)aad)[3] = 0x74616e73;
+    ((uint32_t *)aad)[2] = SPAR;
+    ((uint32_t *)aad)[3] = TANS;
     //TODO copy rel_msg into aad
+    //TODO AAD
     EEPROM_GET(key, fw_key);
     err = aead_dec( (uint8_t *)FIRMWARE_BOOT_PTR,
                     (uint8_t *)FIRMWARE_STORAGE_PTR,
@@ -143,7 +235,26 @@ void handle_boot(void)
 
     //TODO handle error
 
-    //TODO copy Configuration
+    //TODO Wipe temporary storage
+
+    // Get Configuration Metadata
+    size = *(uint32_t *)CONFIGURATION_SIZE_PTR;
+    
+    // Reject invalid size
+    if (size > FLASH_PAGE_SIZE * 64) {
+        uart_writeb(HOST_UART, 'E');
+        return;
+    }
+
+    // Copy Configuration into boot location
+    copy_data_flash((uint32_t) CONFIGURATION_BOOT_PTR, (uint8_t *)CONFIGURATION_STORAGE_PTR, size);
+    //TODO decrypt instead
+
+    // Handle Error
+    if(err) {
+        uart_writeb(HOST_UART, 'E');
+        return;
+    }
 
     // Respond to boot host tool
     uart_writeb(HOST_UART, 'M');
@@ -218,8 +329,6 @@ void handle_readback(void)
     memset(auth, 0, sizeof(auth));
     memset(guess, 0, sizeof(auth));
 
-    // TODO check_sig
-
     // Fulfill Request
     if(region == 'F') {
         EEPROM_GET(key, fw_key);
@@ -233,41 +342,6 @@ void handle_readback(void)
 
 }
 
-
-/**
- * @brief Read data from a UART interface and program to flash memory.
- * 
- * @param interface is the base address of the UART interface to read from.
- * @param dst is the starting page address to store the data.
- * @param size is the number of bytes to load.
- */
-void load_data(uint32_t interface, uint32_t dst, uint32_t size)
-{
-    int i;
-    uint32_t frame_size;
-    uint8_t page_buffer[FLASH_PAGE_SIZE];
-
-    while(size > 0) {
-        // calculate frame size
-        frame_size = size > FLASH_PAGE_SIZE ? FLASH_PAGE_SIZE : size;
-        // read frame into buffer
-        uart_read(HOST_UART, page_buffer, frame_size);
-        // pad buffer if frame is smaller than the page
-        for(i = frame_size; i < FLASH_PAGE_SIZE; i++) {
-            page_buffer[i] = 0xFF;
-        }
-        // clear flash page
-        flash_erase_page(dst);
-        // write flash page
-        flash_write((uint32_t *)page_buffer, dst, FLASH_PAGE_SIZE >> 2);
-        // next page and decrease size
-        dst += FLASH_PAGE_SIZE;
-        size -= frame_size;
-        // send frame ok
-        uart_writeb(HOST_UART, FRAME_OK);
-    }
-}
-
 /**
  * @brief Update the firmware.
  */
@@ -279,10 +353,10 @@ void handle_update(void)
     uint8_t iv[IV_LEN];
     uint8_t tag[TAG_LEN];
     uint8_t key[KEY_LEN];
+    uint8_t aad[16+1025] = {0};
+    uint8_t *rel_msg = aad+16;
     uint32_t rel_msg_size = 0;
     uint32_t rel_msg_write_size = 0;
-    uint8_t aad[16+1025];
-    uint8_t *rel_msg = aad+16;
     uint32_t iter;
     int err;
 
@@ -371,30 +445,38 @@ void handle_update(void)
     uart_writeb(HOST_UART, FRAME_OK);
     
     // Retrieve firmware
-    load_data(HOST_UART, FIRMWARE_STORAGE_PTR, size);
+    load_data(HOST_UART, TEMP_MEM_PTR, size);
+    // load_data(HOST_UART, FIRMWARE_STORAGE_PTR, size);
 
     // Check signature
     ((uint32_t *)aad)[0] = version;
     ((uint32_t *)aad)[1] = rel_msg_size;
-    ((uint32_t *)aad)[2] = 0x53706172;
-    ((uint32_t *)aad)[3] = 0x74616e73;
+    ((uint32_t *)aad)[2] = SPAR;
+    ((uint32_t *)aad)[3] = TANS;
     EEPROM_GET(key, fw_key);
-    err = check_sig( (uint8_t *)FIRMWARE_STORAGE_PTR,
-                    *(uint32_t *)FIRMWARE_SIZE_PTR,
+    // err = check_sig( (uint8_t *)FIRMWARE_STORAGE_PTR,
+    err = check_sig( (uint8_t *)TEMP_MEM_PTR,
+                    size,
                     NULL, //aad,
                     0,    //rel_msg_size + 16,
                     key,
                     iv,
                     tag
                 );
-    //TODO rmv debug
-    uart_write(HOST_UART, "hi", 2);
     memset(key, 0, KEY_LEN);
-    //TODO rmv debug
-    uart_write(HOST_UART, "by", 2);
-    // uart_write(HOST_UART, (uint8_t *)&err, 4);//todo rmv
+    uart_write(HOST_UART, (uint8_t *)&err, 4);//todo rmv
 
-    //TODO handle error
+    // Handle Invalid Signature
+    if(err) {
+        uart_writeb(HOST_UART, 'E');
+        //TODO clear temp
+        return;
+    }
+
+    // Accept Firmware Update
+    copy_data_flash(FIRMWARE_STORAGE_PTR, (uint8_t *)TEMP_MEM_PTR, size);
+    // copy_data_flash(FIRMWARE_STORAGE_PTR, (uint8_t *)FIRMWARE_STORAGE_PTR, size);
+    uart_writeb(HOST_UART, FRAME_OK);
 }
 
 
@@ -406,7 +488,9 @@ void handle_configure(void)
     uint32_t size = 0;
     uint8_t iv[IV_LEN];
     uint8_t tag[TAG_LEN];
+    uint8_t key[KEY_LEN];
     uint32_t iter;
+    int err;
 
     // Acknowledge the host
     uart_writeb(HOST_UART, 'C');
@@ -443,6 +527,21 @@ void handle_configure(void)
     
     // Retrieve configuration
     load_data(HOST_UART, CONFIGURATION_STORAGE_PTR, size);
+
+    // Check signature
+    EEPROM_GET(key, cfg_key);
+    err = check_sig( (uint8_t *)FIRMWARE_STORAGE_PTR,
+                    size,
+                    NULL,
+                    0,
+                    key,
+                    iv,
+                    tag
+                );
+    memset(key, 0, KEY_LEN);
+    uart_write(HOST_UART, (uint8_t *)&err, 4);//todo rmv
+
+    // TODO handle error
 }
 
 /**

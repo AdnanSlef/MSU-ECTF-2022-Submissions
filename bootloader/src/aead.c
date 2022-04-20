@@ -139,12 +139,9 @@ int check_sig(  const uint8_t *ct,
     }
 
     //TODO rmv debug
-    uart_write(HOST_UART, (uint8_t *)&err, 4);
+    // uart_write(HOST_UART, (uint8_t *)&err, 4);
 
     memset(pt, 0, ct_len);
-
-    //TODO rmv debug
-    // uart_write(HOST_UART, "by", 2);
 
     return err;
 
