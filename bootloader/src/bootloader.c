@@ -221,7 +221,7 @@ void handle_boot(void)
     // Decapsulate Protected Firmware for boot
     version = *(uint32_t *)FIRMWARE_VERSION_PTR;
     ((uint32_t *)aad)[0] = version;
-    ((uint32_t *)aad)[1] = *(uint32_t *)FIRMWARE_RELEASE_SIZE_PTR; //rel_msg_size
+    ((uint32_t *)aad)[1] = rel_msg_size;
     ((uint32_t *)aad)[2] = SPAR;
     ((uint32_t *)aad)[3] = TANS;
     memcpy(aad+16, rel_msg, rel_msg_size);
@@ -483,7 +483,6 @@ void handle_update(void)
 
     // Write release message
     flash_write((uint32_t *)rel_msg, FIRMWARE_RELEASE_MSG_PTR, rel_msg_write_size >> 2);
-    uart_write(HOST_UART, (uint8_t *)FIRMWARE_RELEASE_MSG_PTR, 16);
 
     // Accept Firmware Update
     copy_data_flash(FIRMWARE_STORAGE_PTR, (uint8_t *)TEMP_MEM_PTR, size);

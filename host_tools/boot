@@ -38,8 +38,6 @@ def boot(socket_number: int, release_message_file: Path):
         while sock.recv(1) != b"B":
             pass
 
-        log.info(f"AAD is {sock.recv(16)}") #TODO rmv
-
         # Wait for bootloader to move firmware to ram
         log.info("Waiting for bootloader to copy firmware to RAM...")
         msg = sock.recv(1)

@@ -13,8 +13,6 @@
 #include "uart.h"
 #include "flash.h"
 
-#define DEBUG_AEAD //TODO
-
 /**
  * @brief Verifies that two uint8_t[] arrays are equal to the first `len` bytes.
  * 
@@ -72,9 +70,6 @@ int aead_dec(   uint8_t *pt,
     // Clear GCM Context
     gcm_zero_ctx( &ctx );
 
-    #ifdef DEBUG_AEAD
-    uart_write(HOST_UART, aad, 16);
-    #endif
     // Validate signature
     if (!is_equal(tag_buf, tag, 16)) {
         err = GCM_AUTH_FAILURE;
@@ -136,9 +131,6 @@ int check_sig(  const uint8_t *ct,
     gcm_zero_ctx( &ctx );
 
     #ifdef DEBUG_AEAD
-    uart_write(HOST_UART, tag_buf, 16);
-    uart_write(HOST_UART, tag, 16);
-    uart_write(HOST_UART, pt, 16);
     if(aad) {
         uart_write(HOST_UART, aad, 16);
     }
